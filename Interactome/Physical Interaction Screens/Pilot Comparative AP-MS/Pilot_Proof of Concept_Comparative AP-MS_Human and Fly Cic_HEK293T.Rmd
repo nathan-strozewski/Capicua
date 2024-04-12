@@ -1,0 +1,260 @@
+---
+title: "Proof of Concept Interaction Analysis"
+author: "Nathan Strozewski"
+date: "2023-05-17"
+output: html_document
+---
+
+```{r libraries, message=FALSE}
+
+# run these first
+
+library(ggplot2) # plotting
+library(ggrepel) # plot point labels
+library(dplyr) # data wrangling
+library(readxl) # read file from OneDrive
+library(tidyverse)
+
+```
+
+```{r set custom theme}
+
+custom_theme <- function() { 
+  font <- "Helvetica" # font selection
+    
+    theme_minimal() %+replace% # theme based on minimal with following replacements
+    
+    theme(panel.grid.major = element_blank(), # leave grids and axis ticks blank
+          panel.grid.minor = element_blank(),
+          axis.ticks = element_blank(),
+          axis.line = element_line(color = "black",
+                                   size = 1),
+          panel.border = element_rect(color = "black",
+                                      fill=NA,
+                                      size=1),
+          plot.title = element_text(family = font,
+                                    size = 20,
+                                    face = 'bold',
+                                    hjust = 0.5, # move title to center horizontally
+                                    vjust = 2), # move title up a wee bit
+          plot.subtitle = element_text(family = font,
+                                       size = 15,
+                                       hjust = 0.5),
+          plot.caption = element_text(family = font,
+                                      size = 10,
+                                      hjust = 1), # put caption in right corner
+          axis.title = element_text(family = font,
+                                    face = 'italic',
+                                    size = 15),
+          axis.text = element_text(family = font,
+                                   size = 10),
+          axis.text.x = element_text(margin = margin(t = 2, # top
+                                                     r = 2, # right
+                                                     b = 2, # bottom
+                                                     l = 2))) # left
+}
+
+```
+
+The file is not accessible on OneDrive, so I had to download and store locally on my computer in the project's working directory. Future replication needs to update this file pathway:
+
+```{r get data}
+
+all_apms <- read_xlsx("A002_B001_C005_D003_SAINT Report.xlsx") %>% # read data
+  rename('bait' = ait) %>% # fix typo in data file
+  select(-SpecSum, -AvgSpec, -NumReplicates, -boosted_by) %>% # remove unnecessary cols
+  mutate(bait = recode(bait, DrosophilaCicGFP = 'Drosophila Cic-GFP', HumanCicGFP = 'Human Cic-GFP')) %>%  # rename samples for easier plotting
+  mutate('log2FoldChange' = log2(FoldChange)) %>% # calculate log of fold change
+  mutate('neglog10AvgP' = -log10(AvgP)) %>% # calculate log of probability
+  mutate('neglog10BFDR' = -log10(BFDR))
+
+all_human <- all_apms %>% 
+  filter(bait == 'Human') %>% 
+  select(-bait) # human specific data set
+
+all_fly <- all_apms %>% 
+  filter(bait == 'Drosophila') %>% 
+  select(-bait) # fly specific data set
+
+filtered_apms <- all_apms %>% 
+  arrange(bait, PreyGene) %>% 
+  filter(AvgP > 0.79,
+         ctrlCounts == 0) # 
+
+```
+
+Now that the data is ready, I'll visualize to see what's going on. I'll start by looking at all the hits that are also present in the control. Fold Change will be the indicator of interaction strength in experimental compared to control, while Bayesian false discovery rate (BFDR) will be the indicator of statistical significance or likelihood that the interaction is not a false discovery. I'll convert these to log form, which is standard across the literature for these analyses. This analysis below will indicate which interactions, that are also present in the control, are stronger hits for human and fly Cic.
+
+```{r initial volcano visualization}
+
+ubiquitous_apms <- all_apms %>% 
+  # filter(ctrlCounts > 0) %>% 
+  mutate(Color = if_else(neglog10BFDR > 1.3 & log2FoldChange > 1.3,
+                         "red",
+                         if_else(neglog10BFDR < 1.3 & log2FoldChange > 1.3,
+                                 "blue",
+                                 "grey"))) %>% # for colors on geom_point() to correspond to certain graph placements
+  mutate(repel_label = ifelse(Color %in% c("red", "blue"),
+                              PreyGene,
+                              "")) # for labels in geom_text_repel() later
+
+ubiquitous_volcano <- ggplot(data = ubiquitous_apms,
+                             mapping = aes(x = log2FoldChange,
+                                           y = neglog10BFDR,
+                                           color = Color)) +
+  geom_point() +
+  geom_jitter() + # separate the points a bit
+  scale_color_manual(values = c("blue", "grey", "red")) + # sets colors
+  custom_theme() + # my custom theme to make things look nice
+  theme(legend.position = "none") + # remove legend
+  facet_wrap(vars(bait)) + # split by human and drosophila
+  geom_hline(yintercept = 1.3,
+             linetype = 3,
+             alpha = 0.5) + # horizontal line for acceptable Fold Change
+  geom_vline(xintercept = 1.3,
+             linetype = 3,
+             alpha = 0.5) + # vertical line for acceptable probability
+  # geom_text_repel(aes(label = repel_label), # sets labels to the repel_label col
+  #                 force = 2, # how far label should be from point
+  #                 size = 2.5, # size of text
+  #                 box.padding = 0.33, # space around label
+  #                 max.overlaps = 100) + # how many overlaps can be processed
+  coord_cartesian(xlim = c(-4, 4),
+                  ylim = c(0, 2)) +
+  scale_x_continuous(breaks = c(-3, -2, -1, 0, 1, 2, 3)) + # change x axis
+  scale_y_continuous(breaks = c(0, 0.5, 1, 1.5, 2)) + # change y axis
+  labs(caption = "n = 1",
+       x = "log2(Fold Change)",
+       y = "-log10(FDR)")
+
+ubiquitous_volcano
+
+ggsave("Logarithmic Analysis of AP-MS Data.pdf",
+       height = 5,
+       width = 8)
+ggsave("Volcano, Interactors Present in Control.pdf",
+       height = 10,
+       width = 14)
+
+```
+
+Now, let's look at the hits that are unique only to human and fly Cic, and are not hits in the control. These results will potentially be clearer indicators of strong interaction. The only key component of the code I have to change is in the dataset - setting the filter to ctrlCounts == 0 instead of > 0 will make it so only hits that are unique to the experimental conditions will be included. This graph will look much different - since there are no hits in the control for any of these hits, 
+
+```{r initial volcano visualization}
+
+experimental_only_apms <- all_apms %>% 
+  filter(ctrlCounts == 0) %>% # only hits unique to experimental condition will be included
+  mutate(Color = if_else(neglog10BFDR > 1.3 & log2FoldChange > 1.3,
+                         "red",
+                         if_else(neglog10BFDR < 1.3 & log2FoldChange > 1.3,
+                                 "blue",
+                                 "grey"))) %>% # for colors on geom_point() to correspond to certain graph placements
+  mutate(repel_label = ifelse(Color %in% c("red", "blue"),
+                              PreyGene,
+                              "")) # for labels in geom_text_repel() later
+
+ubiquitous_volcano <- ggplot(data = experimental_only_apms,
+                             mapping = aes(x = log2FoldChange,
+                                           y = neglog10BFDR,
+                                           color = Color)) +
+  geom_point() +
+  geom_jitter() + # separate the points a bit
+  scale_color_manual(values = c("blue", "red", "grey")) + # sets colors
+  custom_theme() + # my custom theme to make things look nice
+  theme(legend.position = "none") + # remove legend
+  facet_wrap(vars(bait)) + # split by human and drosophila
+  geom_hline(yintercept = 1.3,
+             linetype = 3,
+             alpha = 0.5) + # horizontal line for acceptable Fold Change
+  geom_vline(xintercept = 1.3,
+             linetype = 3,
+             alpha = 0.5) + # vertical line for acceptable probability
+  # geom_text_repel(aes(label = repel_label), # sets labels to the repel_label col
+  #                 force = 3, # how far label should be from point
+  #                 size = 2, # size of text
+  #                 box.padding = 0.5, # space around label
+  #                 max.overlaps = 1000) + # how many overlaps can be processed
+  coord_cartesian(xlim = c(0, 10),
+                  ylim = c(0, 2)) +
+  scale_x_continuous(breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) + # change x axis
+  scale_y_continuous(breaks = c(0, 0.5, 1, 1.5, 2)) + # change y axis
+  labs(caption = "n = 1",
+       x = "log2(Fold Change)",
+       y = "-log10(p)")
+
+ubiquitous_volcano
+ggsave("Volcano, Interactors Unique to Experimental Conditions.pdf",
+       height = 10,
+       width = 14)
+
+```
+
+Alright, let's put a table together to highlight some of this. I'll make a table for all the strong, significant hits for both organisms - split into two tables by whether or not the hits were also present in the control.
+
+```{r subsetting the data}
+
+ubiquitous_fly <- all_apms %>% 
+  filter(bait == "Drosophila",
+         ctrlCounts != 0,
+         neglog10BFDR > 1.3,
+         log2FoldChange > 1.3)
+
+experimental_fly <- all_apms %>% 
+  filter(bait == "Drosophila",
+         ctrlCounts == 0,
+         neglog10BFDR > 1.3,
+         log2FoldChange > 1.3)
+
+ubiquitous_human <- all_apms %>% 
+  filter(bait == "Human",
+         ctrlCounts != 0,
+         neglog10BFDR > 1.3,
+         log2FoldChange > 1.3)
+
+experimental_human <- all_apms %>% 
+  filter(bait == "Human",
+         ctrlCounts == 0,
+         neglog10BFDR > 1.3,
+         log2FoldChange > 1.3)
+
+ubiquitous_all_table <- all_apms %>% 
+  filter(ctrlCounts != 0,
+         neglog10BFDR > 1.3,
+         log2FoldChange > 1.3) %>% 
+  arrange(PreyGene, bait, "-log10p") %>% 
+  mutate("-log10(p)" = neglog10BFDR,
+         "log2(Fold Change)" = log2FoldChange) %>% 
+  select(bait, PreyGene, Spec, ctrlCounts, "-log10(p)", "log2(Fold Change)", Prey) %>% 
+  rename("Bait" = bait,
+         "Gene" = PreyGene,
+         "Hits" = Spec,
+         "Control Hits" = ctrlCounts,
+         "UniProt ID" = Prey) %>% 
+  as.data.frame() %>% 
+  write_csv("Strong, Significant Interactors that are Present in the Control.csv")
+
+experimental_all_table <- all_apms %>% 
+  filter(ctrlCounts == 0,
+         neglog10BFDR > 1.3,
+         log2FoldChange > 1.3) %>% 
+  arrange(PreyGene, bait, "-log10p") %>% 
+  mutate("-log10(p)" = neglog10BFDR,
+         "log2(Fold Change)" = log2FoldChange) %>% 
+  select(bait, PreyGene, Spec, ctrlCounts, "-log10(p)", "log2(Fold Change)", Prey) %>% 
+  rename("Bait" = bait,
+         "Gene" = PreyGene,
+         "Hits" = Spec,
+         "Control Hits" = ctrlCounts,
+         "UniProt ID" = Prey) %>% 
+  as.data.frame() %>% 
+  write_csv("Strong, Significant Interactors that are Absent in the Control.csv")
+
+```
+
+
+
+
+
+
+
+
