@@ -1,0 +1,213 @@
+---
+title: "Cic>Phosphomutant St.4-5 Embryo Area"
+author: "Nathan Strozewski"
+date: "2024-03-13"
+output: html_document
+---
+
+## Libraries
+
+```{r libraries}
+
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+library(tidyr)
+library(readxl)
+library(ggpubr)
+library(devtools)
+library(gridExtra)
+
+```
+
+## Custom Theme
+
+```{r custom_theme}
+custom_theme <- function() { 
+  font <- "Helvetica" # font selection
+    
+    theme_minimal() %+replace% # theme based on minimal with following replacements
+    
+    theme(panel.grid.major = element_blank(), # leave grids and axis ticks blank
+          panel.grid.minor = element_blank(),
+          axis.ticks = element_blank(),
+          axis.line = element_line(color = "black",
+                                   size = 1),
+          panel.border = element_rect(color = "black",
+                                      fill=NA,
+                                      size=1),
+          plot.title = element_text(family = font,
+                                    size = 20,
+                                    face = 'bold',
+                                    hjust = 0.5, # move title to center horizontally
+                                    vjust = 2), # move title up a wee bit
+          plot.subtitle = element_text(family = font,
+                                       size = 15,
+                                       hjust = 0.5),
+          plot.caption = element_text(family = font,
+                                      size = 10,
+                                      hjust = 1), # put caption in right corner
+          axis.title = element_text(family = font,
+                                    size = 15),
+          axis.text = element_text(family = font,
+                                   size = 10),
+          axis.text.x = element_text(margin = margin(t = 2, # top
+                                                     r = 2, # right
+                                                     b = 2, # bottom
+                                                     l = 2))) # left
+}
+```
+
+## Load aggregated data file
+
+```{r load_data}
+
+all_data <- read_xlsx('MTD>Phosphomutant_Aggregate_Area Measurements.xlsx') %>% 
+   mutate(Genotype = recode(Genotype, "MTD>Yw" = 'Yw',
+                            "MTD>Cic WT-mV" = 'Cic WT-mV',
+                            "MTD>Cic 6A-mV" = 'Cic 6A-mV',
+                            "MTD>Cic 20A-mV" = 'Cic 20A-mV',
+                            "MTD>Cic deltaC2-mV" = 'Cic deltaC2-mV'))
+ 
+```
+
+
+## Data Summary 
+
+```{r summary}
+
+embryo_summary <- as_tibble(group_by(all_data, Genotype) %>% 
+                              summarise(count = n(),
+                                        mean = mean(Area, na.rm = TRUE),
+                                        sd = sd(Area, na.rm = TRUE)))
+                            
+embryo_summary
+
+```
+
+## One-Way ANOVA for area
+
+```{r embryo_anova}
+
+embryo_anova <- aov(Area ~ Genotype, data = all_data)
+summary(embryo_anova)
+
+```
+
+## Post-Hoc T-tests
+
+```{r embyro_ttests}
+
+embryo_ttest_comps <- list(c("Yw", "Cic 20A-mV"), c("Yw", "Cic deltaC2-mV"),
+                           c("Cic WT-mV", "Cic 6A-mV"), c("Cic 6A-mV", "Cic 20A-mV"),
+                           c("Cic 20A-mV", "Cic deltaC2-mV"))
+
+```
+
+## Embryo Size Visualization
+
+```{r embryo_size}
+
+embryo_plot <- ggplot(data = all_data,
+                       mapping = aes(x = Genotype,
+                                     y = Area)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75),
+              mapping = aes(fill = Genotype,
+                            alpha = 0.05)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  stat_compare_means(comparisons = embryo_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.90, bracket.size = 0.25,
+                     tip.length = 0.01,
+                     label.y = c(4150000, 4200000, 4250000, 4300000,
+                                 4350000, 4400000, 4450000)) +
+  custom_theme() +
+  theme(axis.text.x = element_text(vjust = 1, size = 12),
+        legend.position = "none",
+        axis.title.x = element_blank(),
+        plot.subtitle = element_text(hjust = 0, size = 13)) +
+  scale_x_discrete(limits = c("Yw", "Cic WT-mV", "Cic 6A-mV", "Cic 20A-mV", "Cic deltaC2-mV")) +
+  labs(y = "Embryo Size (a.u.)",
+       subtitle = expression(paste("ANOVA: ", italic("F"), "= 11.4, ", italic("p "), "= <0.001")))
+
+embryo_plot
+
+ggsave("MTD>Cic Phosphomutant Embyro Size.pdf")
+
+```
+
+## One-Way ANOVA for ratio
+
+```{r ratio_anova}
+
+ratio_anova <- aov(Ratio ~ Genotype, data = all_data)
+summary(ratio_anova)
+
+```
+## Post-Hoc T-tests
+
+```{r ratio_ttests}
+
+ratio_ttest_comps <- list(c("Yw", "Cic deltaC2-mV"), c("Cic WT-mV", "Cic deltaC2-mV"),
+                          c("Cic deltaC2-mV", "Cic 6A-mV"))
+
+```
+
+## T-test table for Ratios
+
+```{r table_ttest}
+
+table_ttest <- compare_means(Ratio ~ Genotype,
+                             data = all_data,
+                             method = "t.test") %>% 
+  select(group1, group2, p.format, p.signif) %>% 
+  rename("Group 1" = group1,
+         "Group 2" = group2,
+         "P-value" = p.format,
+         "Abbreviation" = p.signif)
+table_ttest <- as.data.frame(table_ttest,
+                             row.names = FALSE) 
+rownames(table_ttest) <- NULL
+table_ttest
+
+png("Ratio T-tests.png",
+    height = 480, width = 480, bg = "white")
+grid.table(table_ttest)
+dev.off()
+
+```
+
+## Embryo Ratio Visualization
+
+```{r embryo_ratio}
+
+ratio_plot <- ggplot(data = all_data,
+                       mapping = aes(x = Genotype,
+                                     y = Ratio)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75),
+              mapping = aes(fill = Genotype),
+              alpha = 0.5) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  stat_compare_means(comparisons = ratio_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.90, bracket.size = 0.25,
+                     tip.length = 0.01) +
+  custom_theme() +
+  theme(axis.text.x = element_text(vjust = 1, size = 13),
+        legend.position = "none",
+        axis.title.x = element_blank(),
+        plot.subtitle = element_text(hjust = 0, size = 13)) +
+  scale_x_discrete(limits = c("Yw", "Cic WT-mV", "Cic 6A-mV", "Cic 20A-mV", "Cic deltaC2-mV")) +
+  labs(y = "Width:Height Ratio (a.u.)",
+       subtitle = expression(paste("ANOVA: ", italic("F"), "= 2.60, ", italic("p "), "= <0.05")))
+
+ratio_plot
+
+ggsave("MTD>Cic Phosphomutant Embyro Ratio.pdf")
+
+```
