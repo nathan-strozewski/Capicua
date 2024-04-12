@@ -1,0 +1,462 @@
+---
+title: "MS1096>Cic x NuRD"
+author: "Nathan Strozewski"
+date: "2024-03-12"
+output: html_document
+---
+
+## Libraries
+
+```{r libraries}
+
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+library(tidyr)
+library(readxl)
+library(ggpubr)
+library(devtools)
+
+```
+
+## Custom Theme
+
+```{r custom_theme}
+custom_theme <- function() { 
+  font <- "Helvetica" # font selection
+    
+    theme_minimal() %+replace% # theme based on minimal with following replacements
+    
+    theme(panel.grid.major = element_blank(), # leave grids and axis ticks blank
+          panel.grid.minor = element_blank(),
+          axis.ticks = element_blank(),
+          axis.line = element_line(color = "black",
+                                   size = 1),
+          plot.title = element_text(family = font,
+                                    size = 20,
+                                    face = 'bold',
+                                    hjust = 0.5, # move title to center horizontally
+                                    vjust = 2), # move title up a wee bit
+          plot.subtitle = element_text(family = font,
+                                       size = 15,
+                                       hjust = 0.5),
+          plot.caption = element_text(family = font,
+                                      size = 10,
+                                      hjust = 1), # put caption in right corner
+          axis.title = element_text(family = font,
+                                    size = 15),
+          axis.text = element_text(family = font,
+                                   size = 10),
+          axis.text.x = element_text(margin = margin(t = 2, # top
+                                                     r = 2, # right
+                                                     b = 2, # bottom
+                                                     l = 2))) # left
+}
+```
+
+## Load aggregated data file
+
+```{r load_data}
+
+all_data <- read_xlsx('A002_B003_C003_D001_E003_Aggregated Data.xlsx')
+
+```
+
+## NuRD Ri Summary Table
+
+```{r nurd_summary_table}
+
+nurd_ri_summary <- as_tibble(group_by(all_data, Full_Genotype) %>% 
+                              summarise(count = n(),
+                                        mean = mean(Area, na.rm = TRUE),
+                                        sd = sd(Area, na.rm = TRUE)))
+                            
+nurd_ri_summary
+
+```
+
+## Check Homogeneity of Variance
+
+```{r nurd_ri_ttest}
+
+nurd_ri_only <- all_data %>% 
+  filter(Condition == "wRi",
+         Measureable == 1,
+         Gene != "Cic-SBP") %>% 
+  select(Gene, Chromosome, Full_Genotype, Area)
+
+nurd_ri_ttest_comps <- list(c("MS1096/+;;wRi/+","MS1096/+;Mi-2 Ri/+;wRi/+"), c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MTA1-like Ri #1"),
+                            c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MTA1-like Ri #2"), c("MS1096/+;;wRi/+", "MS1096/+;MBD-like Ri/+;wRi/+"),
+                            c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MBD-like Ri"), c("MS1096/+;;wRi/+", "MS1096/+;simj Ri/+;wRi/+"),
+                            c("MS1096/+;;wRi/+","MS1096/+;CDK2AP1 Ri/+;wRi/+"), c("MS1096/+;;wRi/+", "MS1096/+;;wRi/HDAC1 Ri"))
+
+nurd_ri_ttests_tibble <- as_tibble(compare_means(Area ~ Full_Genotype, data = nurd_ri_only, ref.group = "MS1096/+;;wRi/+",
+                                                 method = "t.test"))
+nurd_ri_ttests_tibble
+
+```
+
+## Remove ns Comparison
+
+```{r remove_nurd_ri_ns}
+
+nurd_ri_ttest_sigcomps <- nurd_ri_ttest_comps
+
+nurd_ri_ttest_sigcomps
+
+```
+
+## NuRD Ri Wing Size Visualization
+
+```{r nurd_ri_wingsize}
+
+nurd_ri_plot <- ggplot(data = nurd_ri_only,
+                       mapping = aes(x = Full_Genotype,
+                                     y = Area,
+                                     fill = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75),
+              mapping = aes(alpha = 0.5)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  stat_compare_means(comparisons = nurd_ri_ttest_sigcomps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, label.y = c(2250000, 2300000, 2350000, 2400000,
+                                                 2450000, 2500000, 2550000, 2600000,
+                                                 2650000, 2700000, 2750000, 2800000),
+                     vjust = 0.95) +
+  custom_theme() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+        legend.position = "none",
+        axis.title.y = element_blank()) +
+        coord_cartesian(xlim = c(0, 2750000)) +
+  scale_x_discrete(limits = c("MS1096/+;;wRi/HDAC1 Ri", "MS1096/+;CDK2AP1 Ri/+;wRi/+", "MS1096/+;simj Ri/+;wRi/+",
+                              "MS1096/+;;wRi/MBD-like Ri", "MS1096/+;MBD-like Ri/+;wRi/+", "MS1096/+;;wRi/MTA1-like Ri #2",
+                              "MS1096/+;;wRi/MTA1-like Ri #1", "MS1096/+;Mi-2 Ri/+;wRi/+",
+                              "MS1096/+;;wRi/+")) +
+  labs(y = "Wing Size (a.u.)") +
+  coord_flip()
+
+nurd_ri_plot
+
+ggsave("NuRD Ri Wing Size.pdf")
+
+```
+
+## ANOVA for Cic-SBP + Mi-2 Ri
+
+```{r mi2_anova}
+
+mi2_data <- all_data %>% 
+  filter(Full_Genotype %in% c('MS1096/+;;wRi/+', 'MS1096/+;;Cic-SBP/wRi','MS1096/+;Mi-2 Ri/+;wRi/+', 'MS1096/+;Mi-2 Ri/+;Cic-SBP/+'),
+         Measureable == 1) %>%
+  select(Gene, Chromosome, Condition, Full_Genotype, Area)
+
+mi2_anova <- compare_means(Area ~ Full_Genotype, data = mi2_data, method = "anova")
+mi2_anova
+
+mi2_ttest_comps <- list(c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi"), c("MS1096/+;;wRi/+", "MS1096/+;Mi-2 Ri/+;wRi/+"),
+                        c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;Mi-2 Ri/+;Cic-SBP/+"), c("MS1096/+;Mi-2 Ri/+;wRi/+", "MS1096/+;Mi-2 Ri/+;Cic-SBP/+"))
+
+mi2_anova <- ggplot(data = mi2_data,
+                    mapping = aes(x = Full_Genotype,
+                                  y = Area,
+                                  group = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  geom_point(mapping = aes(color = Full_Genotype),
+             alpha = 0.5,
+             position = "jitter") +
+  stat_compare_means(comparisons = mi2_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.75) +
+  # stat_compare_means(method = "anova") +
+            custom_theme() +
+            theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+                  legend.position = "none",
+                  axis.title.x = element_blank()) +
+            scale_x_discrete(limits = c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi", 
+                                        "MS1096/+;Mi-2 Ri/+;wRi/+", "MS1096/+;Mi-2 Ri/+;Cic-SBP/+")) +
+            labs(y = "Wing Size (a.u.)")
+
+mi2_anova
+ggsave("Mi-2 Anova.pdf")
+
+
+```
+
+## ANOVA for Cic-SBP + MTA1-like Ri
+
+```{r mta1_anova}
+
+mta1_data <- all_data %>% 
+                  filter(Full_Genotype %in% c('MS1096/+;;wRi/+', 'MS1096/+;;Cic-SBP/wRi','MS1096/+;;wRi/MTA1-like Ri #1', 'MS1096/+;;Cic-SBP/MTA1-like Ri #1',
+                                              'MS1096/+;;wRi/MTA1-like Ri #2', 'MS1096/+;;Cic-SBP/MTA1-like Ri #2'),
+                         Measureable == 1) %>%
+  select(Gene, Chromosome, Condition, Full_Genotype, Area)
+
+mta1_anova <- compare_means(Area ~ Full_Genotype, data = mta1_data, method = "anova")
+mta1_anova
+
+mta1_ttest_comps <- list(c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi"), c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MTA1-like Ri #1"),
+                         c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MTA1-like Ri #2"), c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;;Cic-SBP/MTA1-like Ri #1"),
+                         c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;;Cic-SBP/MTA1-like Ri #2"),c("MS1096/+;;wRi/MTA1-like Ri #1", "MS1096/+;;Cic-SBP/MTA1-like Ri #1"),
+                         c("MS1096/+;;wRi/MTA1-like Ri #2", "MS1096/+;;Cic-SBP/MTA1-like Ri #2"))
+
+mta1_anova <- ggplot(data = mta1_data,
+                    mapping = aes(x = Full_Genotype,
+                                  y = Area,
+                                  group = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  geom_point(mapping = aes(color = Full_Genotype),
+             alpha = 0.5,
+             position = "jitter") +
+  stat_compare_means(comparisons = mta1_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.75) +
+  # stat_compare_means(method = "anova") +
+            custom_theme() +
+            theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+                  legend.position = "none",
+                  axis.title.x = element_blank()) +
+            scale_x_discrete(limits = c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi","MS1096/+;;wRi/MTA1-like Ri #1", "MS1096/+;;Cic-SBP/MTA1-like Ri #1",
+                                              "MS1096/+;;wRi/MTA1-like Ri #2", "MS1096/+;;Cic-SBP/MTA1-like Ri #2")) +
+            labs(y = "Wing Size (a.u.)")
+
+mta1_anova
+ggsave("MTA1-like Anova.pdf")
+
+```
+
+## ANOVA for Cic-SBP + MBD-like Ri
+
+```{r mbd-like_anova}
+
+mbd_data <- all_data %>% 
+                  filter(Full_Genotype %in% c('MS1096/+;;wRi/+', 'MS1096/+;;Cic-SBP/wRi','MS1096/+;MBD-like Ri/+;wRi/+', 'MS1096/+;MBD-like Ri/+;Cic-SBP/+',
+                                              'MS1096/+;;wRi/MBD-like Ri', 'MS1096/+;;Cic-SBP/MBD-like Ri'),
+                         Measureable == 1) %>%
+  select(Gene, Chromosome, Condition, Full_Genotype, Area)
+
+mbd_anova <- compare_means(Area ~ Full_Genotype, data = mta1_data, method = "anova")
+mbd_anova
+
+mbd_ttest_comps <- list(c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi"), c("MS1096/+;;wRi/+", "MS1096/+;MBD-like Ri/+;wRi/+"),
+                         c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MBD-like Ri"), c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;MBD-like Ri/+;Cic-SBP/+"),
+                         c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;;Cic-SBP/MBD-like Ri"),c("MS1096/+;MBD-like Ri/+;wRi/+", "MS1096/+;MBD-like Ri/+;Cic-SBP/+"),
+                         c("MS1096/+;;wRi/MBD-like Ri", "MS1096/+;;Cic-SBP/MBD-like Ri"))
+
+mbd_anova <- ggplot(data = mbd_data,
+                    mapping = aes(x = Full_Genotype,
+                                  y = Area,
+                                  group = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  geom_point(mapping = aes(color = Full_Genotype),
+             alpha = 0.5,
+             position = "jitter") +
+  stat_compare_means(comparisons = mbd_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.75) +
+  # stat_compare_means(method = "anova") +
+            custom_theme() +
+            theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+                  legend.position = "none",
+                  axis.title.x = element_blank()) +
+            scale_x_discrete(limits = c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi","MS1096/+;MBD-like Ri/+;wRi/+", "MS1096/+;MBD-like Ri/+;Cic-SBP/+",
+                                              "MS1096/+;;wRi/MBD-like Ri", "MS1096/+;;Cic-SBP/MBD-like Ri")) +
+            labs(y = "Wing Size (a.u.)")
+
+mbd_anova
+ggsave("MBD-like Anova.pdf")
+
+```
+
+## ANOVA for Cic-SBP + simj Ri
+
+```{r simj_anova}
+
+simj_data <- all_data %>% 
+                  filter(Full_Genotype %in% c('MS1096/+;;wRi/+', 'MS1096/+;;Cic-SBP/wRi','MS1096/+;simj Ri/+;wRi/+', 'MS1096/+;simj Ri/+;Cic-SBP/+'),
+                         Measureable == 1) %>%
+  select(Gene, Chromosome, Condition, Full_Genotype, Area)
+
+simj_anova <- compare_means(Area ~ Full_Genotype, data = simj_data, method = "anova")
+simj_anova
+
+simj_ttest_comps <- list(c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi"), c("MS1096/+;;wRi/+", "MS1096/+;simj Ri/+;wRi/+"))
+
+simj_anova <- ggplot(data = simj_data,
+                    mapping = aes(x = Full_Genotype,
+                                  y = Area,
+                                  group = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  geom_point(mapping = aes(color = Full_Genotype),
+             alpha = 0.5,
+             position = "jitter") +
+  stat_compare_means(comparisons = simj_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.75) +
+  # stat_compare_means(method = "anova") +
+            custom_theme() +
+            theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+                  legend.position = "none",
+                  axis.title.x = element_blank()) +
+            scale_x_discrete(limits = c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi","MS1096/+;simj Ri/+;wRi/+", "MS1096/+;simj Ri/+;Cic-SBP/+")) +
+            labs(y = "Wing Size (a.u.)")
+
+simj_anova
+ggsave("simj Anova.pdf")
+
+```
+
+## ANOVA for Cic-SBP + CDK2AP1 Ri
+
+```{r cdk_anova}
+
+cdk_data <- all_data %>% 
+                  filter(Full_Genotype %in% c('MS1096/+;;wRi/+', 'MS1096/+;;Cic-SBP/wRi','MS1096/+;CDK2AP1 Ri/+;wRi/+', 'MS1096/+;CDK2AP1 Ri/+;Cic-SBP/+'),
+                         Measureable == 1) %>%
+  select(Gene, Chromosome, Condition, Full_Genotype, Area)
+
+cdk_anova <- compare_means(Area ~ Full_Genotype, data = cdk_data, method = "anova")
+cdk_anova
+
+cdk_ttest_comps <- list(c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi"), c("MS1096/+;;wRi/+", "MS1096/+;CDK2AP1 Ri/+;wRi/+"),
+                        c("MS1096/+;CDK2AP1 Ri/+;wRi/+", "MS1096/+;CDK2AP1 Ri/+;Cic-SBP/+"), c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;CDK2AP1 Ri/+;Cic-SBP/+"))
+
+cdk_anova <- ggplot(data = cdk_data,
+                    mapping = aes(x = Full_Genotype,
+                                  y = Area,
+                                  group = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  geom_point(mapping = aes(color = Full_Genotype),
+             alpha = 0.5,
+             position = "jitter") +
+  stat_compare_means(comparisons = cdk_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.75) +
+  # stat_compare_means(method = "anova") +
+            custom_theme() +
+            theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+                  legend.position = "none",
+                  axis.title.x = element_blank()) +
+            scale_x_discrete(limits = c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi","MS1096/+;CDK2AP1 Ri/+;wRi/+", "MS1096/+;CDK2AP1 Ri/+;Cic-SBP/+")) +
+            labs(y = "Wing Size (a.u.)")
+
+cdk_anova
+ggsave("CDK2AP1 Anova.pdf")
+
+```
+
+## ANOVA for Cic-SBP + HDAC1 Ri
+
+```{r hdac1_anova}
+
+hdac1_data <- all_data %>% 
+                  filter(Full_Genotype %in% c('MS1096/+;;wRi/+', 'MS1096/+;;Cic-SBP/wRi','MS1096/+;;wRi/HDAC1 Ri', 'MS1096/+;;Cic-SBP/HDAC1 Ri'),
+                         Measureable == 1) %>%
+  select(Gene, Chromosome, Condition, Full_Genotype, Area)
+
+hdac1_anova <- compare_means(Area ~ Full_Genotype, data = hdac1_data, method = "anova")
+hdac1_anova
+
+hdac1_ttest_comps <- list(c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi"), c("MS1096/+;;wRi/+", "MS1096/+;;wRi/HDAC1 Ri"),
+                        c("MS1096/+;;wRi/HDAC1 Ri", "MS1096/+;;Cic-SBP/HDAC1 Ri"), c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;;Cic-SBP/HDAC1 Ri"))
+
+hdac1_anova <- ggplot(data = hdac1_data,
+                    mapping = aes(x = Full_Genotype,
+                                  y = Area,
+                                  group = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  geom_point(mapping = aes(color = Full_Genotype),
+             alpha = 0.5,
+             position = "jitter") +
+  stat_compare_means(comparisons = hdac1_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.75) +
+  # stat_compare_means(method = "anova") +
+            custom_theme() +
+            theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+                  legend.position = "none",
+                  axis.title.x = element_blank()) +
+            scale_x_discrete(limits = c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi","MS1096/+;;wRi/HDAC1 Ri", "MS1096/+;;Cic-SBP/HDAC1 Ri")) +
+            labs(y = "Wing Size (a.u.)")
+
+hdac1_anova
+ggsave("HDAC1 Anova.pdf")
+
+```
+
+## Complete Graph
+
+```{r complete_graph}
+
+complete_data <- all_data %>% 
+  select(Gene, Chromosome, Condition, Full_Genotype, Area)
+
+complete_anova <- compare_means(Area ~ Full_Genotype, data = complete_data, method = "anova")
+complete_anova
+
+complete_ttest_comps <- list(c("MS1096/+;;wRi/+", "MS1096/+;;Cic-SBP/wRi"), c("MS1096/+;;wRi/+","MS1096/+;Mi-2 Ri/+;wRi/+"),
+                             c("MS1096/+;;Cic-SBP/wRi", "MS1096/+;Mi-2 Ri/+;Cic-SBP/+"),
+                             c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MTA1-like Ri #1"), c("MS1096/+;;wRi/Cic-SBP", "MS1096/+;;Cic-SBP/MTA1-like Ri #1"),
+                             c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MTA1-like Ri #2"), c("MS1096/+;;wRi/Cic-SBP", "MS1096/+;;Cic-SBP/MTA1-like Ri #2"),
+                             c("MS1096/+;;wRi/+", "MS1096/+;MBD-like Ri #1/+;wRi/+"), c("MS1096/+;;wRi/Cic-SBP", "MS1096/+;MBD-like Ri/+;Cic-SBP/+"),
+                             c("MS1096/+;;wRi/+", "MS1096/+;;wRi/MBD-like Ri"), c("MS1096/+;;wRi/Cic-SBP", "MS1096/+;;Cic-SBP/MBD-like Ri"),
+                             c("MS1096/+;;wRi/+", "MS1096/+;simj Ri/+;wRi/+"), c("MS1096/+;;wRi/Cic-SBP", "MS1096/+;simj Ri/+;Cic-SBP/+"),
+                             c("MS1096/+;;wRi/+","MS1096/+;CDK2AP1 Ri/+;wRi/+"), c("MS1096/+;;wRi/Cic-SBP","MS1096/+;CDK2AP1 Ri/+;Cic-SBP/+"),
+                             c("MS1096/+;;wRi/+", "MS1096/+;;wRi/HDAC1 Ri"), c("MS1096/+;;wRi/Cic-SBP", "MS1096/+;;Cic-SBP/HDAC1 Ri"))
+
+complete_graph <- ggplot(data = complete_data,
+                         mapping = aes(x = Full_Genotype,
+                                       y = Area,
+                                       group = Full_Genotype)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               color = "black") +
+  geom_point(mapping = aes(color = Full_Genotype),
+             alpha = 0.5,
+             position = "jitter") +
+  stat_compare_means(comparisons = complete_ttest_comps, method = "t.test",
+                     mapping = aes(label = "p.signif"),
+                     hide.ns = TRUE, vjust = 0.75) +
+  custom_theme() +
+  theme(axis.text.x = element_text(#angle = 45, 
+                                   vjust = 1, hjust=1, size = 8),
+        legend.position = "none",
+        axis.title.x = element_blank()) +
+  scale_x_discrete(limits = c("MS1096/+;;Cic-SBP/HDAC1 Ri", "MS1096/+;;wRi/HDAC1 Ri", 
+                              "MS1096/+;CDK2AP1 Ri/+;Cic-SBP/+", "MS1096/+;CDK2AP1 Ri/+;wRi/+",
+                              "MS1096/+;simj Ri/+;Cic-SBP/+", "MS1096/+;simj Ri/+;wRi/+", 
+                              "MS1096/+;;Cic-SBP/MBD-like Ri", "MS1096/+;;wRi/MBD-like Ri",
+                              "MS1096/+;MBD-like Ri/+;Cic-SBP/+", "MS1096/+;MBD-like Ri #1/+;wRi/+", 
+                              "MS1096/+;;Cic-SBP/MTA1-like Ri #2", "MS1096/+;;wRi/MTA1-like Ri #2",
+                              "MS1096/+;;Cic-SBP/MTA1-like Ri #1", "MS1096/+;;wRi/MTA1-like Ri #1", 
+                              "MS1096/+;Mi-2 Ri/+;Cic-SBP/+", "MS1096/+;Mi-2 Ri/+;wRi/+",
+                              "MS1096/+;;Cic-SBP/wRi", "MS1096/+;;wRi/+")) +
+  labs(y = "Wing Size (a.u.)") +
+  coord_flip()
+
+complete_graph
+
+
+```
