@@ -1,0 +1,214 @@
+---
+title: "Cic Phospho-mutant Neurobehavioral Assays"
+author: "Nathan Strozewski"
+date: "2024-03-29"
+output: html_document
+---
+
+
+## Libraries
+
+```{r libraries}
+
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+library(tidyr)
+library(readxl)
+library(ggpubr)
+library(devtools)
+library(gridExtra)
+library(performance)
+
+```
+
+## Custom Theme
+
+```{r custom_theme and color palette}
+custom_theme <- function() { 
+  font <- "Helvetica" # font selection
+    
+    theme_minimal() %+replace% # theme based on minimal with following replacements
+    
+    theme(panel.grid.major = element_blank(), # leave grids and axis ticks blank
+          panel.grid.minor = element_blank(),
+          axis.ticks = element_blank(),
+          axis.line = element_line(color = "black",
+                                   size = 1),
+          panel.border = element_rect(color = "black",
+                                      fill=NA,
+                                      size=1),
+          plot.title = element_text(family = font,
+                                    size = 20,
+                                    face = 'bold',
+                                    hjust = 0.5, # move title to center horizontally
+                                    vjust = 2), # move title up a wee bit
+          plot.subtitle = element_text(family = font,
+                                       size = 15,
+                                       hjust = 0.5),
+          plot.caption = element_text(family = font,
+                                      size = 10,
+                                      hjust = 1), # put caption in right corner
+          axis.title = element_text(family = font,
+                                    size = 15),
+          axis.text = element_text(family = font,
+                                   size = 10),
+          axis.text.x = element_text(margin = margin(t = 2, # top
+                                                     r = 2, # right
+                                                     b = 2, # bottom
+                                                     l = 2))) # left
+}
+
+custom_palette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+
+## Load aggregated data file
+
+```{r load_data}
+
+geo_data <- read_xlsx('Geotaxis_Elav x Cic Phosphomutants_2024_01_24.xlsx') %>% 
+            mutate(distance_cm = distance_in * 2.54,
+                   relative_dist = distance_cm / 15.24) %>% 
+            mutate(genotype = recode(genotype, "elav>GFP" = 'GFP',
+                            "elav>Cic WT-mV" = 'Cic WT-mV',
+                            "elav>Cic 6A-mV" = 'Cic 6A-mV'))
+
+photo_data <- read_xlsx('Phototaxis_Elav x Cic Phosphomutants_2024_01_24.xlsx') %>% 
+            mutate(distance_cm = distance_in * 2.54,
+                   relative_dist = distance_cm / 15.24) %>% 
+            mutate(genotype = recode(genotype, "elav>GFP" = 'GFP',
+                            "elav>Cic WT-mV" = 'Cic WT-mV',
+                            "elav>Cic 6A-mV" = 'Cic 6A-mV'))
+
+
+```
+
+## Geo Data Summary 
+
+```{r geo_summary}
+
+geo_summary <- geo_data %>% 
+               group_by(genotype, time_sec) %>%  
+               mutate(genotype = factor(genotype, levels = c('GFP', 'Cic WT-mV', 'Cic 6A-mV'))) %>% 
+               summarise(mean_rel_dist = mean(relative_dist),
+                         sd_rel_dist = sd(relative_dist),
+                         upper = mean_rel_dist + sd_rel_dist,
+                         lower = mean_rel_dist - sd_rel_dist)
+
+geo_summary
+
+geo_summary_factors <- geo_summary %>% 
+  mutate(time_sec = as.factor(time_sec))
+
+geo_aov <- aov(mean_rel_dist ~ genotype + time_sec,
+               data = geo_summary_factors)
+summary(geo_aov)
+
+geo_geno_tukeyHSD <- TukeyHSD(geo_aov, "genotype")
+print(geo_geno_tukeyHSD)
+
+```
+No statistical impact of time on distance. All genotypes were statistically distinct.
+
+```{r basic_geo_viz}
+
+geo_plot <- ggplot(data = geo_summary,
+                   mapping = aes(x = time_sec,
+                                 y = mean_rel_dist,
+                                 group = genotype)) +
+  geom_line(aes(color = genotype,
+                linetype = genotype),
+            stat = "summary") +
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                alpha = 0.75, size = 0.2, width = 0.25,
+                position = "dodge") +
+  scale_shape(guide = FALSE) +
+  scale_linetype(guide = FALSE) +
+  scale_color_manual(values = c("#000000", "#56B4E9", "#D55E00")) +
+  custom_theme() +
+  theme(legend.title = element_text(hjust = 0.5, face = "bold", size=14),
+        legend.text=element_text(size=12),
+        plot.subtitle = element_text(hjust = 0, size = 12)) +
+  scale_x_continuous(breaks = c(0, 5, 10, 15, 20, 25, 30)) +
+  scale_y_continuous(breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  labs(x = "Time (sec)",
+       y = "Distance Traveled Upwards",
+       color = "Genotype",
+       linetype = "Genotype",
+       subtitle = expression(paste("ANOVA: ", italic("F"), "= 306.9, ", italic("p "), "= <0.001")))
+
+geo_plot
+
+ggsave("Figure 7B_elav-GAL4 Geotaxis.pdf",
+       width = 3000,
+       height = 1500,
+       units = "px")
+
+```
+
+```{r geo_summary}
+
+photo_summary <- photo_data %>% 
+               group_by(genotype, time_sec) %>%  
+               mutate(genotype = factor(genotype, levels = c('GFP', 'Cic WT-mV', 'Cic 6A-mV'))) %>% 
+               summarise(mean_rel_dist = mean(relative_dist),
+                         sd_rel_dist = sd(relative_dist),
+                         upper = mean_rel_dist + sd_rel_dist,
+                         lower = mean_rel_dist - sd_rel_dist)
+
+photo_summary
+
+photo_summary_factors <- photo_summary %>% 
+  mutate(time_sec = as.factor(time_sec))
+
+photo_aov <- aov(mean_rel_dist ~ genotype + time_sec,
+               data = photo_summary_factors)
+summary(photo_aov)
+
+photo_geno_tukeyHSD <- TukeyHSD(photo_aov, "genotype")
+print(photo_geno_tukeyHSD)
+
+```
+
+```
+
+```{r basic_geo_viz}
+
+photo_plot <- ggplot(data = photo_summary,
+                   mapping = aes(x = time_sec,
+                                 y = mean_rel_dist,
+                                 group = genotype)) +
+  geom_line(aes(color = genotype,
+                linetype = genotype),
+            stat = "summary") +
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                alpha = 0.75, size = 0.2, width = 0.25,
+                position = "dodge") +
+  scale_shape(guide = FALSE) +
+  scale_linetype(guide = FALSE) +
+  scale_color_manual(values = c("#000000", "#56B4E9", "#D55E00")) +
+  custom_theme() +
+  theme(legend.title = element_text(hjust = 0.5, face = "bold", size=14),
+        legend.text=element_text(size=12),
+        plot.subtitle = element_text(hjust = 0, size = 12)) +
+  scale_x_continuous(breaks = c(0, 5, 10, 15, 20, 25, 30)) +
+  scale_y_continuous(breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  labs(x = "Time (sec)",
+       y = "Distance Traveled Towards Light",
+       color = "Genotype",
+       linetype = "Genotype",
+       subtitle = expression(paste("ANOVA: ", italic("F"), "= 833.2, ", italic("p "), "= <0.001")))
+
+photo_plot
+
+ggsave("Figure 7A_elav-GAL4 Phototaxis.pdf",
+       width = 3000,
+       height = 1500,
+       units = "px")
+
+```
+
